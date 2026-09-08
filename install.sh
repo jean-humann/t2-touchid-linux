@@ -95,6 +95,7 @@ install -o root -g root -m 0755 "$source_dir/src/"*.py "$target_dir/src/"
 install -o root -g root -m 0755 "$source_dir/src/t2-touchid-doctor.py" /usr/local/sbin/t2-touchid-doctor
 install -o root -g root -m 0755 "$source_dir/src/t2-touchid-inventory.py" /usr/local/sbin/t2-touchid-inventory
 install -o root -g root -m 0755 "$source_dir/src/t2-touchid-identities.py" /usr/local/sbin/t2-touchid-identities
+install -o root -g root -m 0755 "$source_dir/src/t2-touchid-provision-catacomb.py" /usr/local/sbin/t2-touchid-provision-catacomb
 install -o root -g root -m 0755 "$source_dir/src/t2-touchid-identify-finger.py" /usr/local/sbin/t2-touchid-identify-finger
 install -o root -g root -m 0755 "$source_dir/src/t2-touchid-manage.py" /usr/local/sbin/t2-touchid-manage
 install -o root -g root -m 0755 "$source_dir/src/t2-touchid-baseline.py" /usr/local/sbin/t2-touchid-baseline
@@ -139,10 +140,13 @@ install -o root -g root -m 0755 \
   /usr/local/sbin/t2-pam-fingerprint-prompt
 install -o root -g root -m 0644 "$source_dir/src/t2_sep_transport.ko" /usr/local/lib/t2-touchid/t2_sep_transport.ko
 install -o root -g root -m 0755 "$source_dir/src/t2-keybag-load.sh" /usr/local/sbin/t2-keybag-load
+install -o root -g root -m 0700 "$source_dir/src/t2-keybag-unlock.sh" /usr/local/sbin/t2-keybag-unlock
 install -o root -g root -m 0700 "$source_dir/src/t2-pam-unlock.sh" /usr/local/sbin/t2-pam-unlock
+install -o root -g root -m 0700 "$source_dir/src/t2-pam-fingerprint-ready.sh" /usr/local/sbin/t2-pam-fingerprint-ready
 install -o root -g root -m 0700 "$source_dir/src/t2-credential-unlock.sh" /usr/local/sbin/t2-credential-unlock
 install -o root -g root -m 0700 "$source_dir/src/t2-biometric-ready.sh" /usr/local/sbin/t2-biometric-ready
 install -o root -g root -m 0700 "$source_dir/src/t2-biometric-port-refresh.sh" /usr/local/sbin/t2-biometric-port-refresh
+install -o root -g root -m 0700 "$source_dir/src/t2-bridge-network-prepare.sh" /usr/local/sbin/t2-bridge-network-prepare
 install -o root -g root -m 0700 "$source_dir/src/t2-sep-transport-load.sh" /usr/local/sbin/t2-sep-transport-load
 install -o root -g root -m 0644 "$source_dir/systemd/system/"*.service /etc/systemd/system/
 install -d -o root -g root -m 0755 /etc/systemd/sleep.conf.d
@@ -169,9 +173,17 @@ printf '[Service]\nBindReadOnlyPaths=%s\nEnvironment=SUDO_UID=%s\n' \
 chmod 0644 \
   /etc/systemd/system/t2-touchid-adaptive-sync.service.d/05-account-home.conf
 install -d -o root -g root -m 0755 /etc/modprobe.d
-module_options='options t2_sep_transport register_ool=1 probe_capabilities=1'
+# Do NOT force register_ool=1 / probe_capabilities=1 here. Those apply to
+# EVERY load including the early PCI-modalias auto-load (~7s, before bridgeOS
+# is ready): the capability probe then times out (-110), DMA stays pinned,
+# and /dev/t2-aks is disabled until reboot while the loader correctly refuses
+# to replace a register_ool=1 instance (observed MacBookPro15,2 2026-09-06).
+# Leave the driver observation-only by default (BAR4 map, status only); the
+# service loader passes register_ool=1 explicitly on its own modprobe line.
+# Probe negotiation stays off unless ACM research opts in below.
+module_options='# observation-only by default; t2-sep-transport-load passes register_ool=1 explicitly'
 if [[ $acm_research == 1 ]]; then
-  module_options+=" register_acm=1 aks_platform_asid=$aks_platform_asid aks_platform_proc_uniqueid=1"
+  module_options+=$'\n'"options t2_sep_transport register_acm=1 aks_platform_asid=$aks_platform_asid aks_platform_proc_uniqueid=1"
   if [[ -n $aks_platform_cdhash ]]; then
     module_options+=" aks_platform_cdhash=${aks_platform_cdhash,,}"
   fi
@@ -183,6 +195,7 @@ install -d -o "$target_user" -g "$target_user" -m 0755 "$target_home/.config/sys
 install -o "$target_user" -g "$target_user" -m 0644 \
   "$source_dir/systemd/user/"*.service "$target_home/.config/systemd/user/"
 
+install -d -o root -g root -m 0755 /etc/dbus-1/system.d
 cat >/etc/dbus-1/system.d/99-t2-touchid-fprint.conf <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
@@ -196,6 +209,7 @@ EOF
 chmod 0644 /etc/dbus-1/system.d/99-t2-touchid-fprint.conf
 
 systemctl daemon-reload
+systemctl disable --now t2-interactive-unlock.service 2>/dev/null || true
 systemctl enable t2-sep-transport.service t2-biometric-port-refresh.service t2-keybag-load.service t2-credential-unlock.service t2-biometric-ready.service fprintd.service
 systemctl reload dbus.service
 target_runtime_dir=/run/user/$target_uid
