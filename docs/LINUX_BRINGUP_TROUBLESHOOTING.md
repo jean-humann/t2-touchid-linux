@@ -3,7 +3,10 @@
 This guide records a successful manual bring-up on a MacBookPro15,2 running
 Omarchy, `linux-t2` 6.19.11, bridgeOS 23P350, and fprintd 1.94.5. Both an
 enrolled-finger `verify-match` and an unenrolled-finger `verify-no-match` were
-confirmed. It supplements the main installation guide with failure recovery
+confirmed. A MacBookPro16,1 on Omarchy 4.0.3 / `linux-t2-mbp161` additionally
+confirmed the mixed `0x50`/version-1 capability envelope, `v1-skip-cal` digest,
+`fprintd-verify` match/no-match, Omarchy PAM lock/sudo, and unattended boot
+unlock. It supplements the main installation guide with failure recovery
 learned during that bring-up and omits steps the main guide already covers.
 
 Do not publish values substituted for placeholders below. In particular, keep
@@ -135,6 +138,20 @@ Success requires an integrity-checked capability reply in the kernel log and
 `RESULT: INITIALIZED` from `sudo tools/check-t2-linux-readiness.sh`. If the
 service takes about 12 seconds and reports capability error `-110`, the state is
 pinned for that boot. Use the macOS recovery sequence before another attempt.
+
+On **MacBookPro16,1** the `0x4d` reply is not the 15,2/16,2 v1 envelope
+(length 92, header `0x48`, version 1). This model answers with **length 100,
+header `0x50`, version 1** (v2-sized header, v1 version field). Stock probe
+returns `-71` (`-EPROTO`). Accepting that mix and hashing it as a v2 header
+then returns `-74` (`-EBADMSG`). The matching digest is **`v1-skip-cal`**:
+SHA-256 over the v1 header (`0x48`) and the payload after the v2 header
+(`0x50`); the 8-byte calendar field is not hashed. Later AKS ops reuse that
+span. PCI autoload must stay observation-only; the service is the one
+`register_ool=1` start. Do not unload after DMA. Do not apply an unrelated
+`start_transport` / 32-bit DMA change as the first `-71` fix.
+
+If capability error is `-71` with a different envelope, or `-74` after all
+three version-1 spans fail, stop for that boot. Do not retry.
 
 ## Unlock keybags
 

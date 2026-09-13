@@ -85,6 +85,12 @@ ACM context or the bounded password-only diagnostic), and `0x4d`
 additionally restricted to the recovered codec, session, password, context, and
 option layouts. Capability negotiation uses the required v1 header, while
 normal operations use the negotiated v2 header and calendar-time extension.
+On MacBookPro16,1 the `0x4d` reply is v2-sized (`header 0x50`, length 100)
+with version still 1. Hashing that mix as a v2 header failed integrity
+(`-EBADMSG` / `-74` on 13 Sep 22:07). Probe then tries version-1 digest
+spans; this 16,1 matched `v1-skip-cal` (hash `0x48`, skip the 8-byte
+calendar, hash the payload after `0x50`) on 13 Sep 22:16. Later AKS ops
+reuse that winner.
 
 ### The `/dev/t2-acm` endpoint-10 device
 
