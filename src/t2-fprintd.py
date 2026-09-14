@@ -85,6 +85,12 @@ if AUTO_SYNC_ADAPTIVE_VALUE not in {"0", "1"}:
 AUTO_SYNC_ADAPTIVE = AUTO_SYNC_ADAPTIVE_VALUE == "1"
 
 
+def is_match_all_finger(finger_name: object) -> bool:
+    """PAM and the compatibility alias share one all-identities match path."""
+
+    return finger_name == "any" or finger_name == ENROLLED_FINGER
+
+
 def verdict_from_result(
     result: object, target_finger: str | None = None
 ) -> str:
@@ -397,20 +403,13 @@ class T2Backend:
         return verdict, result
 
     async def verify_fprint(self, requested_finger: str) -> tuple[str, dict]:
-        """Resolve presentation afresh, then let the probe resolve authority."""
+        """Match every enrolled identity; the probe owns live authority."""
+        if not is_match_all_finger(requested_finger):
+            raise RuntimeError("requested fprint identity is unavailable")
         async with self.operation_lock:
-            view = await self.runtime_projection()
-            try:
-                request = t2_fprint_runtime.resolve_match(
-                    view, requested_finger
-                )
-            except t2_fprint_runtime.FprintRuntimeError as error:
-                raise RuntimeError("requested fprint identity is unavailable") from error
             return await self.verify(
-                target_finger=request.target_finger,
-                resolve_any_finger=(
-                    request.requested_finger == "any" and view.complete
-                ),
+                target_finger=None,
+                resolve_any_finger=False,
             )
 
     async def _request_adaptive_sync(self) -> None:
@@ -747,12 +746,9 @@ class FprintDevice(ServiceInterface):
         requested = username or LINUX_USER
         if requested not in ALLOWED_PAM_USERS:
             raise DBusError(f"{FPRINT_ERROR}.PermissionDenied", "unknown user")
-        try:
-            self.enrolled_fingers = await self.backend.list_fingers()
-        except Exception as error:
-            raise DBusError(
-                f"{FPRINT_ERROR}.Internal", "fingerprint inventory unavailable"
-            ) from error
+        # Presentation only: pam_fprintd needs a non-zero count before Claim.
+        # A live Bridge inventory here collides with match teardown and is
+        # reported as "no fingerprints," which PAM turns into a password.
         if not self.enrolled_fingers:
             raise DBusError(
                 f"{FPRINT_ERROR}.NoEnrolledPrints",
@@ -792,8 +788,11 @@ class FprintDevice(ServiceInterface):
         self.verify_task = current_task
         started = False
         try:
-            async with self.backend.operation_lock:
-                view = await self.backend.runtime_projection()
+            if not self.enrolled_fingers or not is_match_all_finger(finger_name):
+                raise DBusError(
+                    f"{FPRINT_ERROR}.NoEnrolledPrints",
+                    "finger is not enrolled",
+                )
             self._require_claim_owner()
             if self.verify_task is not current_task:
                 raise RuntimeError("verification task binding changed")
@@ -808,18 +807,6 @@ class FprintDevice(ServiceInterface):
                     f"{FPRINT_ERROR}.AlreadyInUse",
                     "a biometric operation is active",
                 )
-            if not isinstance(view, t2_fprint_runtime.RuntimeProjection):
-                raise RuntimeError(
-                    "fprint projection returned an invalid result"
-                )
-            self.enrolled_fingers = view.listed_fingers
-            try:
-                t2_fprint_runtime.resolve_match(view, finger_name)
-            except t2_fprint_runtime.FprintRuntimeError as error:
-                raise DBusError(
-                    f"{FPRINT_ERROR}.NoEnrolledPrints",
-                    "finger is not enrolled",
-                ) from error
             # fprint's ABI explicitly permits "any" on this signal to tell
             # clients that any enrolled identity may be presented. Emit the
             # instruction before capture; the exact successful identity is

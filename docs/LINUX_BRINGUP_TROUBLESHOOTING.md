@@ -5,9 +5,11 @@ Omarchy, `linux-t2` 6.19.11, bridgeOS 23P350, and fprintd 1.94.5. Both an
 enrolled-finger `verify-match` and an unenrolled-finger `verify-no-match` were
 confirmed. A MacBookPro16,1 on Omarchy 4.0.3 / `linux-t2-mbp161` additionally
 confirmed the mixed `0x50`/version-1 capability envelope, `v1-skip-cal` digest,
-`fprintd-verify` match/no-match, Omarchy PAM lock/sudo, and unattended boot
-unlock. It supplements the main installation guide with failure recovery
-learned during that bring-up and omits steps the main guide already covers.
+`fprintd-verify` match/no-match, Omarchy PAM lock/sudo/**pkexec**, unattended
+boot unlock, and back-to-back pkexec after list/`any` stopped opening a live
+Bridge inventory. It supplements the main installation guide with failure
+recovery learned during that bring-up and omits steps the main guide already
+covers.
 
 Do not publish values substituted for placeholders below. In particular, keep
 account names, serials, UUIDs, MAC addresses, link-local addresses, keybags,
@@ -181,4 +183,6 @@ observations from the tested machine:
   only shows what is currently supported.
 
 Only after all checks and both physical controls pass should PAM be installed,
-with an existing root shell kept open and password fallback tested.
+with an existing root shell kept open and password fallback tested. Operator
+stacks, pkexec pinning, and why list/`any` must not open Bridge are in
+[PAM_AUTH.md](PAM_AUTH.md).

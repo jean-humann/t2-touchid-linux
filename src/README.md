@@ -188,14 +188,12 @@ incomplete projection lists exactly one compatibility alias and resolves it to
 an all-identities match; a complete projection lists all canonical names and
 resolves a named request only to the same named target. `any` remains an
 all-identities request and can never become private identity authority. The
-fprintd facade refreshes this projection for list and verify transactions. It
-keeps the compatibility alias for incomplete labels; when the projection is
-complete it advertises the canonical list, routes names through the
-single-identity gate, and resolves an `any` success to the exact canonical
-`VerifyFingerMatched` name. It emits the ABI-defined
-`VerifyFingerSelected("any")` instruction before capture so PAM does not
-present a stale anatomical prompt after authentication. Both paths require
-their pre-match gate and post-match unchanged-state attestation.
+fprintd facade does not refresh this projection on the PAM list or `any`/alias
+verify path: those calls must not open a Bridge lease. They advertise the
+stored compatibility alias, emit `VerifyFingerSelected` before capture, and
+let the match probe re-resolve private authority under `operation.lock`. Native
+enroll and delete still refresh a live projection. `t2-touchid-fprint-status`
+remains the diagnostic inventory command.
 
 ### Named-match authority
 
