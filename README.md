@@ -301,7 +301,14 @@ different state.
 8. **Only after those controls pass**, install the relevant files from `pam/`
    into `/etc/pam.d/` with `sudo tools/install-pam.sh`. Keep password
    authentication as a fallback and keep a root shell open while you test;
-   `sudo tools/rollback-pam.sh` restores the originals.
+   `sudo tools/rollback-pam.sh` restores the originals. The installer writes
+   the sudo stack, `/etc/pam.d/polkit-1` (pkexec / Omarchy polkit dialog), and
+   the Omarchy lock stacks when those files already exist. After creating
+   `polkit-1`, restart the shell (`omarchy restart shell`) so the agent rereads
+   PAM. Lid closed still skips the sensor and uses the password field. polkit
+   126+ runs the helper as an all-root systemd service; fprintd pins the
+   connecting agent from that helper's stdin `SO_PEERCRED` the same way it pins
+   sudo's setuid real UID.
 
    The sudo template displays a generic pre-capture sensor message through a
    fixed-text helper that writes to the controlling terminal or sudo's

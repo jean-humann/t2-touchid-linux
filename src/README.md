@@ -233,8 +233,11 @@ process has either stable all-root credentials or the exact setuid-PAM shape
 originating real UID as part of the immutable process subject; any UID
 transition invalidates the claim. It may use the unique active-local-session
 fallback only for that pinned real UID because sudo's PAM helper is not itself
-registered with logind. An all-root process still requires a direct
-pidfd-to-session binding and cannot use that fallback. `NameOwnerChanged`
+registered with logind. polkit 126+ `polkit-agent-helper-1 --socket-activated`
+is all-root rather than setuid; its originating UID is the `SO_PEERCRED` peer
+on stdin (the desktop agent) and uses the same unique-session fallback for
+that UID only. An all-root process that is not that helper still requires a
+direct pidfd-to-session binding and cannot use that fallback. `NameOwnerChanged`
 cancels active work, closes the pidfd, and releases the claim. The username
 remains presentation input, never authority by itself.
 

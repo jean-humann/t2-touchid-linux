@@ -96,8 +96,14 @@ shape `real=user; effective=saved=filesystem=root`; its real UID is pinned
 alongside the bus UID and start time. Because sudo's PAM helper is not itself
 registered with logind, it may use the unique same-real-UID
 active-local-session fallback; it cannot select another UID or an ambiguous
-session. An all-root client still requires a direct pidfd-to-session binding
-and can never borrow an arbitrary session. The process credentials, session,
+session. polkit 126+ runs `polkit-agent-helper-1 --socket-activated` as an
+all-root systemd service instead of that setuid shape. That helper is accepted
+only when stdin is the accepted `/run/polkit/agent-helper.socket` connection
+and `SO_PEERCRED` names one non-root desktop agent; that peer UID is pinned
+the same way as a setuid real UID and may use only that UID's unique
+active-local-session fallback. An all-root client that is not that helper
+still requires a direct pidfd-to-session binding and can never borrow an
+arbitrary session. The process credentials, session,
 and account generation are all revalidated on every claim-scoped call. Claims
 are serialized so a concurrent claim cannot pass while evidence collection is
 suspended. `NameOwnerChanged` cleanup cancels active verification, closes the
