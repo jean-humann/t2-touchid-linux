@@ -57,10 +57,11 @@ class FakeBackend:
 
 
 class FakePinnedCaller:
-    def __init__(self, sender):
+    def __init__(self, sender, short_lived_pam=False):
         self.sender = sender
         self.closed = False
         self.verify_count = 0
+        self.short_lived_pam = short_lived_pam
 
     def verify(self):
         if self.closed:
@@ -600,6 +601,34 @@ class DeviceLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await claim(device)
         self.assertTrue(raised.exception.type.endswith(".AlreadyInUse"))
         await MODULE.FprintDevice.Release.__wrapped__(device)
+
+    async def test_claim_state_file_names_short_lived_pam_then_clears(self):
+        async def short_lived_collector(_bus, sender):
+            return FakePinnedCaller(sender, short_lived_pam=True)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fprint-claim"
+            device = MODULE.FprintDevice(
+                FakeBackend(),
+                object(),
+                short_lived_collector,
+                fake_claim_evidence_collector,
+            )
+            device.claim_state_path = path
+            await claim(device)
+            self.assertEqual(path.read_text(encoding="ascii"), "sudo\n")
+            await MODULE.FprintDevice.Release.__wrapped__(device)
+            self.assertFalse(path.exists())
+
+    async def test_claim_state_file_does_not_ask_ready_to_wait_for_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fprint-claim"
+            device = make_device()
+            device.claim_state_path = path
+            await claim(device)
+            self.assertEqual(path.read_text(encoding="ascii"), "other\n")
+            await MODULE.FprintDevice.Release.__wrapped__(device)
+            self.assertFalse(path.exists())
 
     async def test_dead_completed_claim_is_reaped_before_replacement(self):
         backend = FakeBackend()

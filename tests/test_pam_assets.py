@@ -52,6 +52,19 @@ class PamAssetTests(unittest.TestCase):
         self.assertIn("t2-pam-fingerprint-ready", sudo_stack)
         self.assertNotIn("t2-pam-unlock", sudo_stack)
 
+    def test_ready_waits_for_sudo_claim_not_lock_before_pam_fprintd(self):
+        ready = (ROOT / "src/t2-pam-fingerprint-ready.sh").read_text()
+        fprintd = (ROOT / "src/t2-fprintd.py").read_text()
+
+        self.assertIn("/run/t2-touchid/workers/fprint-claim", ready)
+        self.assertIn("PAM_CLAIM_WAIT_SECONDS = 32", fprintd)
+        self.assertIn("SECONDS + 32", ready)
+        self.assertIn("polkit-agent-helper-1", ready)
+        self.assertIn("fprintd-verify", ready)
+        self.assertIn("SHORT_LIVED_PAM_COMMS", fprintd)
+        self.assertIn("claim_state_path", fprintd)
+        self.assertIn("must not delay TTY sudo", ready)
+
     def test_polkit_uses_the_same_fingerprint_gates_as_sudo(self):
         polkit_stack = (ROOT / "pam/polkit-1").read_text()
         installer = (ROOT / "tools/install-pam.sh").read_text()

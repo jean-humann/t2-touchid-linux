@@ -66,7 +66,9 @@ syslogs `failed: exit code 1`; `quiet` only hides it from the dialog.
 `t2-pam-fingerprint-ready` must succeed or PAM skips the sensor. Before the
 first unlock of the boot, sudo asks for the Linux password, then a hidden
 macOS password, then records readiness. With the host-encrypted credstore,
-unlock is unattended.
+unlock is unattended. After readiness, the same helper waits out another
+short-lived fingerprint PAM client so a second sudo does not see
+`AlreadyInUse` and drop to password.
 
 ## pkexec caller pin
 
@@ -102,6 +104,13 @@ This facade therefore:
 
 `Claim` stays exclusive and immediate. Do not queue claims: pam_fprintd will
 time out the D-Bus method (~25 s) and fall through to password anyway.
+Overlapping **sudo / pkexec** wait in `t2-pam-fingerprint-ready` instead
+(before the touch prompt), up to 32 s, while
+`/run/t2-touchid/workers/fprint-claim` names `sudo` / `pkexec` /
+`polkit-agent-helper-1`. Start the second command after the first has
+claimed (about a second). Two Claims in the same instant can still race.
+The lock screen is `other` and does not delay TTY sudo. After the wait,
+`Claim` is a normal exclusive take.
 
 Hardware-tested 14 Sep 2026 on MacBookPro16,1: two `pkexec bash -c 'id -u'`
 one second apart both returned `0` with `pam_fprintd`, no inventory error.

@@ -36,6 +36,7 @@ import t2_fprint_worker_client
 import t2_fprint_delete_worker_client
 import t2_dbus_identity
 import t2_fprint_claim
+import t2_polkit_grant
 from t2_dbus_sender import (
     DBusSenderError,
     SenderAwareMessageBus,
@@ -58,6 +59,22 @@ AUTO_SYNC_ADAPTIVE_VALUE = os.environ.get(
 ALLOWED_PAM_USERS = (LINUX_USER,)
 UNSTARTED_CLAIM_SECONDS = 5.0
 COMPLETED_CLAIM_SECONDS = 0.5
+# pam_fprintd's Claim is a D-Bus method (~25 s timeout) and cannot wait for a
+# busy sensor. Overlapping sudo/pkexec must wait *before* Claim, in
+# t2-pam-fingerprint-ready. This file names the occupant so that helper waits
+# only for short-lived PAM clients, not the lock screen.
+CLAIM_STATE_PATH = Path("/run/t2-touchid/workers/fprint-claim")
+PAM_CLAIM_WAIT_SECONDS = 32
+SHORT_LIVED_PAM_COMMS = frozenset(
+    {
+        "sudo",
+        "sudoedit",
+        "pkexec",
+        "polkit-agent-he",
+        "polkit-agent-helper-1",
+        "fprintd-verify",
+    }
+)
 DESKTOP_FEEDBACK_UNITS = frozenset(
     {
         "t2-touchid-alert.service",
@@ -553,6 +570,7 @@ class FprintDevice(ServiceInterface):
         self.enrolled_fingers: tuple[str, ...] = (ENROLLED_FINGER,)
         self.finger_present = False
         self.finger_needed = False
+        self.claim_state_path: Path | None = None
 
     @staticmethod
     def _consume_signal_send(result: object) -> None:
@@ -683,9 +701,74 @@ class FprintDevice(ServiceInterface):
             self.claimed_sender = sender
             self.claimed_caller = caller
             self.claimed_evidence = evidence
+            self._publish_claim_state()
             self.claim_expiry_task = asyncio.create_task(
                 self._expire_unstarted_claim()
             )
+
+    def _claim_state_label(self) -> str:
+        caller = self.claimed_caller
+        if caller is None:
+            return ""
+        flagged = getattr(caller, "short_lived_pam", None)
+        if flagged is True:
+            return "sudo"
+        if flagged is False:
+            return "other"
+        subject = getattr(caller, "subject", None)
+        pid = getattr(subject, "pid", None)
+        if type(pid) is not int or pid <= 0:
+            return "other"
+        try:
+            raw = t2_polkit_grant._read_bounded(
+                Path("/proc") / str(pid) / "comm"
+            )
+            comm = raw.decode("ascii").strip()
+        except (
+            OSError,
+            UnicodeError,
+            t2_polkit_grant.PolkitGrantError,
+        ):
+            return "other"
+        if comm in SHORT_LIVED_PAM_COMMS:
+            return comm
+        return "other"
+
+    def _publish_claim_state(self) -> None:
+        path = self.claim_state_path
+        if not isinstance(path, Path):
+            return
+        label = self._claim_state_label()
+        if not label:
+            self._clear_claim_state()
+            return
+        tmp = path.with_name(path.name + ".tmp")
+        try:
+            fd = os.open(
+                tmp,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC,
+                0o600,
+            )
+            try:
+                os.write(fd, f"{label}\n".encode("ascii"))
+            finally:
+                os.close(fd)
+            os.replace(tmp, path)
+        except OSError as error:
+            print(f"fprint claim state not published: {error}", flush=True)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _clear_claim_state(self) -> None:
+        path = self.claim_state_path
+        if not isinstance(path, Path):
+            return
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def _clear_claim(self) -> None:
         caller = self.claimed_caller
@@ -693,6 +776,7 @@ class FprintDevice(ServiceInterface):
         self.claimed_sender = None
         self.claimed_caller = None
         self.claimed_evidence = None
+        self._clear_claim_state()
         if caller is not None:
             caller.close()
 
@@ -1358,6 +1442,7 @@ async def main_async(args: argparse.Namespace) -> None:
         enrollment_client=enrollment_client_for_arguments(args),
         deletion_client=deletion_client_for_arguments(args),
     )
+    device.claim_state_path = CLAIM_STATE_PATH
 
     # fprintd's historical ABI contains hyphenated property names, although
     # D-Bus member-name validators (including dbus-next's) reject hyphens.
